@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+soxl_report.html
+soxl_backtest.png
+shortterm_results.csv
