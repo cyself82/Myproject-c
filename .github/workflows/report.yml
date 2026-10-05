@@ -2,6 +2,8 @@
 name: SOXL report
 
 on:
+  push:
+    branches: [main]           # 코드를 올릴 때마다 바로 다시 게시
   schedule:
     - cron: "30 22 * * 1-5"   # 평일 22:30 UTC (한국 시간 다음 날 아침 7:30)
   workflow_dispatch:           # GitHub 화면에서 수동 실행
