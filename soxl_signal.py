@@ -137,8 +137,12 @@ def main():
     p.add_argument("--plot", action="store_true", help="수익 곡선 그림 저장(matplotlib 필요)")
     p.add_argument("--report", action="store_true", help="결과를 HTML 페이지로 만들어 브라우저로 열기")
     p.add_argument("--no-open", action="store_true", help="리포트 파일만 만들고 창은 열지 않기 (자동 실행용)")
+    p.add_argument("--live", action="store_true", help="장중에 60초마다 지금 가격을 받아 리포트를 다시 쓰기")
+    p.add_argument("--live-ticks", type=int, default=0, help="--live 를 몇 번만 갱신하고 끝내기 (점검용, 0이면 장 마감까지)")
     p.add_argument("--buy-price", type=float, default=None, help="내가 실제로 산 평균 가격(달러). 넣으면 내 손절 가격도 계산")
     a = p.parse_args()
+    if a.live:
+        a.report = True
     if a.report:
         a.signal = False  # 리포트에는 백테스트 표와 곡선이 필요
 
@@ -253,6 +257,13 @@ def main():
     fx = paper.usdkrw()
     paper.print_paper(ptr, ppos, pord, plast, fx)
 
+    # ---- 매매일지: 규칙이 내놓은 가격을 날마다 한 줄씩. '실제 체결가' 같은 칸은 사용자가 직접 적는다
+    import journal
+    from pathlib import Path
+    log_path = Path(__file__).with_name(journal.FILE)
+    log = journal.update(log_path, paper.history(pdf, ptr, ppos), ptr, ppos)
+    print(f"매매일지: {log_path}" if log is not None else "매매일지가 엑셀에 열려 있어 갱신 못 했어요 (엑셀을 닫고 다시 실행).")
+
     if a.report:
         import webbrowser
         from pathlib import Path
@@ -266,9 +277,21 @@ def main():
             "SOXX 200일선": f"{sma(soxx, 200).iloc[-1]:.2f}",
         }
         period = f"{c.index[0].date()} ~ {c.index[-1].date()} · 수수료 {FEE:.1%} · 손절 {a.stop:.0%}"
-        path = report.build(Path(__file__).with_name("soxl_report.html"), last, prices,
-                            signals, rows, curves, period, note, plan,
-                            paper_data=(ptr, ppos, pord, plast, fx))
+        def write(live=None, refresh=None):
+            # 오늘 장에서 이미 체결된 것으로 보이면 주문 카드를 실제 체결가 기준으로 바꾼다
+            if live and "fill" in live:
+                fill = live["fill"]
+            else:
+                fill = None if ppos else paper.today_fill(pord)
+            return report.build(Path(__file__).with_name("soxl_report.html"), last, prices,
+                                signals, rows, curves, period, note, plan,
+                                paper_data=(ptr, ppos, pord, plast, fx), live=live, refresh=refresh, fill=fill,
+                                log=log)
+
+        live = paper.live_status(ppos, pord) if a.live else None
+        if a.live and live is None:
+            live = dict(price=None, error=True)
+        path = write(live, 60 if a.live else None)
         print(f"리포트 저장: {path}")
         # 주소창·탭 없는 창(앱 모드)으로 열기. Edge나 Chrome이 없으면 기본 브라우저로 연다.
         import os
@@ -283,6 +306,26 @@ def main():
             subprocess.Popen([str(exe), f"--app={path.as_uri()}", "--window-size=980,1100"])
         else:
             webbrowser.open(path.as_uri())
+
+        if a.live:
+            # 창은 위에서 한 번만 열고, 파일만 60초마다 다시 쓴다 (페이지가 스스로 새로고침).
+            import time
+            print("실시간 갱신 중입니다. 뉴욕 16:05 이후 자동으로 끝나고, Ctrl+C 로 바로 끝낼 수 있습니다.", flush=True)
+            ticks = 0
+            try:
+                while True:
+                    now_ny = pd.Timestamp.now(tz="America/New_York")
+                    if now_ny.strftime("%H:%M") >= "16:05" or (a.live_ticks and ticks >= a.live_ticks):
+                        break
+                    time.sleep(60 if not a.live_ticks else 5)
+                    new = paper.live_status(ppos, pord)
+                    live = new if new else dict(live, error=True)  # 못 받으면 이전 숫자 유지
+                    write(live, 60)
+                    ticks += 1
+            except KeyboardInterrupt:
+                pass
+            write(dict(live, ended=True))
+            print("실시간 갱신을 끝냈습니다.")
 
 
 if __name__ == "__main__":
