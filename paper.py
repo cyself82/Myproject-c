@@ -107,6 +107,13 @@ def run(df, start=START):
     j = n - 1
     if open_pos:
         order = None
+        # 참고용: 보유 중이 아니었다면 다음 거래일에 나왔을 가격 (연습 기록은 한 번에 하나만 보유하므로 쓰지 않음)
+        if np.isnan(ma[j]) or c[j] <= ma[j]:
+            open_pos["ref"] = None
+        else:
+            limit = c[j] - K * a[j]
+            open_pos["ref"] = dict(limit=round(limit, 2), range_low=round(limit * (1 + gap_q(df)), 2),
+                                   floor=round(limit - FLOOR_ATR * a[j], 2), atr=round(a[j], 2))
     elif np.isnan(ma[j]) or c[j] <= ma[j]:
         order = dict(skip=True, close=round(c[j], 2), ma=round(ma[j], 2))
     else:
@@ -265,14 +272,13 @@ def history(df, trades, open_pos, start=START):
     for i in range(int(np.searchsorted(dates, pd.Timestamp(start))), n + 1):
         day = dates[i].date() if i < n else next_session(dates[-1])
         j = i - 1
-        if any(s < day and (e is None or day <= e) for s, e in spans):  # 산 다음 날부터 판 날까지
-            rows.append(dict(date=day, status="보유 중"))
-        elif np.isnan(a[j]) or np.isnan(ma[j]) or c[j] <= ma[j]:
-            rows.append(dict(date=day, status="매수 쉼"))
-        else:
+        held = any(s < day and (e is None or day <= e) for s, e in spans)  # 산 다음 날부터 판 날까지
+        if np.isnan(a[j]) or np.isnan(ma[j]) or c[j] <= ma[j]:
+            rows.append(dict(date=day, status="보유 중" if held else "매수 쉼"))
+        else:   # 보유 중인 날도 그날의 가격은 참고용으로 남긴다
             limit = c[j] - K * a[j]
-            rows.append(dict(date=day, status="주문", limit=round(limit, 2), floor=round(limit - FLOOR_ATR * a[j], 2),
-                             range_low=round(limit * (1 + q), 2),
+            rows.append(dict(date=day, status="보유 중" if held else "주문", limit=round(limit, 2),
+                             floor=round(limit - FLOOR_ATR * a[j], 2), range_low=round(limit * (1 + q), 2),
                              target=round(limit + M * a[j], 2), stop=round(limit - S * a[j], 2)))
     return rows
 

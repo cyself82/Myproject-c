@@ -16,7 +16,8 @@ STATE = {  # 상태: (큰 글씨, 설명, 색)
     "cash": ("현금 대기", "사지 않고 기다림", "#8a94a6"),
 }
 LINE_COLORS = ["#8a94a6", "#e08a1e", "#12a36d", "#d0453a", "#7a5cd6", "#2f6fd0"]
-DISCLAIMER = "공부용 참고 신호이며 투자 조언이 아닙니다. SOXL은 3배 레버리지라 손실이 매우 클 수 있습니다."
+SHOW_BUDGET = False   # "100만원이면 약 몇 주" 줄을 보여 줄지 (금액은 일단 빼고 가격만 보기로 함)
+DISCLAIMER ="공부용 참고 신호이며 투자 조언이 아닙니다. SOXL은 3배 레버리지라 손실이 매우 클 수 있습니다."
 
 CSS = """
 :root { --bg:#f1f3f6; --card:#ffffff; --text:#1c2330; --sub:#667085; --line:#e3e7ee; }
@@ -76,6 +77,8 @@ table.plan td.why { font-size:13px; color:var(--sub); }
 table.howto td.val { white-space:normal; font-size:14px; }
 ul.checks { margin:0; padding-left:20px; font-size:14px; }
 ul.checks li { margin-bottom:6px; }
+.order.practice .nums b { font-size:28px; }
+.order.practice h2 { margin-bottom:4px; }
 .record { font-size:14px; padding:0 8px; margin:-4px 0 16px; }
 details.more { margin-top:8px; }
 details.more > summary { cursor:pointer; font-weight:700; padding:14px 8px; }
@@ -145,7 +148,8 @@ def _next_session(day):
 
 
 def _order_card(paper_data, fill=None, pre=None):
-    """맨 위 카드: 단기 규칙이 계산한 다음 장의 매수·익절·손절 가격과 연습 기록 한 줄.
+    """맨 위 카드: 보유 여부와 상관없이 매일 그날의 매수 범위와 매도(익절·손절) 범위를 보여 준다.
+    그 아래에 연습 기록(한 번에 하나만 보유)의 현재 상태를 따로 둔다.
 
     fill: 오늘 장에서 이미 체결된 것으로 보일 때 paper.today_fill() 결과 (실제 체결가 기준 가격)
     """
@@ -158,66 +162,75 @@ def _order_card(paper_data, fill=None, pre=None):
     def num(label, value, color):
         return f'<div><span>{label}</span><b style="color:{color}">{e(str(value))}</b></div>'
 
-    if pos:
+    def span(a, b):
+        return f"{a:.2f} ~ {b:.2f}"
+
+    # ---- 오늘의 가격: 보유 중이어도 그날 규칙이 내놓는 가격은 매일 보여 준다
+    today = pos.get("ref") if pos else (None if order["skip"] else order)
+    if today:
         color = blue
-        back = last_date            # 보유가 끝난 다음 날(매수 가격이 다시 나오는 날)
+        hi, lo, atr = today["limit"], today["range_low"], today["atr"]
+        up, down = paper.M * atr, paper.S * atr
+        qty = ""
+        if fx and SHOW_BUDGET:
+            shares = paper.BUDGET_KRW / fx / hi
+            qty = (f'<div class="line">{paper.BUDGET_KRW // 10000}만원이면 약 {shares:.2f}주 '
+                   f'(1주 단위면 {int(shares)}주)</div>')
+        inner = (f'<div class="nums">{num("매수 범위", span(lo, hi), blue)}'
+                 f'{num("익절(매도) 범위", span(lo + up, hi + up), green)}'
+                 f'{num("손절(매도) 범위", span(lo - down, hi - down), red)}</div>'
+                 f'{qty}'
+                 f'<div class="line small">매수: 매수 상한가 {hi}에 지정가로 걸어 둡니다. 시가가 더 낮게 열리면 그 시가에 체결됩니다. '
+                 f'과거에 시가가 상한가보다 낮게 열린 날의 90%가 이 범위 안이었어요.</div>'
+                 f'<div class="line small">매도: 익절가 = 체결가 + {up:.2f}, 손절가 = 체결가 - {down:.2f}. '
+                 f'범위는 매수 범위의 아래쪽과 위쪽에 체결됐을 때 기준입니다. '
+                 f'둘 다 안 닿으면 {paper.H}거래일째 종가에 정리합니다.</div>'
+                 f'<div class="line small">매수 하한가(참고) {today["floor"]}: 16년 동안 시가가 이보다 낮게 시작해 체결된 날은 7번뿐이었고, '
+                 f'그 7번의 평균 결과는 -4.7%였습니다.</div>')
+    else:
+        color = grey
+        why = (f'종가 {order["close"]}가 200일 평균 {order["ma"]} 아래라서' if order and order["skip"]
+               else "종가가 200일 평균 아래라서")
+        inner = f'<div class="big">오늘은 매수 쉬는 날</div><div class="line">{why} 매수 가격을 내지 않습니다.</div>'
+    card = (f'<div class="card order" style="--c:{color}">'
+            f'<h1>오늘의 가격 ({nxt.month}/{nxt.day:02d} 장)</h1>'
+            f'<div class="small">{e(str(last_date))} 종가로 계산한 달러 가격 · 규칙이 계산한 값이며 추천이 아닙니다 · '
+            f'장 시작 전(한국 시간 밤 10시 30분, 겨울에는 11시 30분 전)에 걸어 두는 가격이고 하루 동안 바뀌지 않습니다</div>'
+            f'{inner}'
+            + (f'<div class="line">장 전 가격 <b>{pre["price"]}</b> (전일 종가 대비 {pre["change"]:+.1%}) · '
+               f'<span class="small">가져온 시각 {e(pre["fetched"])} (한국 시간)</span></div>' if pre else "") +
+            f'<div class="line small">과거 성적(2020년 이후): 한 번에 하나만 보유하면 승률 58%, 평균 +1.8%/회. '
+            f'보유 중에도 매일 사면 승률 56%, 평균 +1.0%/회이고 나쁜 주의 손실이 약 4배입니다.</div></div>')
+
+    # ---- 연습 기록 (한 번에 하나만 보유)
+    s = paper.stats(trades)
+    start = datetime.date.fromisoformat(paper.START)
+    summary = (f'{start.month}/{start.day}부터, 실제 돈 없이 한 번에 하나만 보유했다면: '
+               f'완료 {s["count"]}건 · 승률 {s["win_rate"]:.0%} · 누적 {s["total"]:+.1%}')
+    if pos:
+        back = last_date            # 보유가 끝난 다음 날(연습 기록이 다시 새로 살 수 있는 날)
         for _ in range(pos["days_left"] + 1):
             back = _next_session(back)
-        inner = (f'<div class="big">연습 보유 중 · {pos["days_held"] + 1}거래일째 / 최대 {paper.H}일</div>'
-                 f'<div class="line">{e(str(pos["entry_date"]))}에 {pos["entry"]}에 산 것으로 기록 · '
-                 f'{e(str(last_date))} 종가 {pos["last"]} ({pos["pnl"]:+.1%})</div>'
-                 f'<div class="nums">{num("익절가", pos["target"], green)}{num("손절가", pos["stop"], red)}</div>'
-                 f'<div class="line small">남은 기한 {pos["days_left"]}거래일. 그때까지 둘 다 안 닿으면 마지막 날 종가에 팝니다.</div>'
-                 f'<div class="line small">보유가 끝나면 다음 날부터 매수 상한가와 보통 체결 범위가 다시 나와요 '
-                 f'(늦어도 {back.month}/{back.day}).</div>')
+        body = (f'<div class="line"><b>보유 중 · {pos["days_held"] + 1}거래일째 / 최대 {paper.H}일</b> · '
+                f'{e(str(pos["entry_date"]))}에 {pos["entry"]}에 산 것으로 기록 · '
+                f'{e(str(last_date))} 종가 {pos["last"]} ({pos["pnl"]:+.1%})</div>'
+                f'<div class="nums">{num("익절가", pos["target"], green)}{num("손절가", pos["stop"], red)}</div>'
+                + (f'<div class="line small">장 전 가격 기준: {e(pre["note"])}</div>' if pre and pre["note"] else "") +
+                f'<div class="line small">남은 기한 {pos["days_left"]}거래일. 그때까지 둘 다 안 닿으면 마지막 날 종가에 팝니다. '
+                f'연습 기록은 보유가 끝난 다음 날(늦어도 {back.month}/{back.day})부터 다시 새로 삽니다.</div>')
     elif fill:
-        color = blue
         how = (f'시가 {fill["open"]}가 매수 상한가 {fill["limit"]}보다 낮게 시작해, 시가에 체결' if fill["gapped"]
                else f'장중에 매수 상한가 {fill["limit"]}까지 내려와, 그 가격에 체결')
         if fill.get("below_floor"):
             how += f' (매수 하한가 {order["floor"]}보다도 낮게 시작한 드문 날)'
-        inner = (f'<div class="nums">{num("체결가", fill["fill"], blue)}'
-                 f'{num("익절가", fill["target"], green)}{num("손절가", fill["stop"], red)}</div>'
-                 f'<div class="line small">{how} · 익절가와 손절가는 체결가 기준 · 최대 {paper.H}거래일 보유</div>')
-    elif order["skip"]:
-        color = grey
-        inner = (f'<div class="big">오늘 밤은 매수 없음</div>'
-                 f'<div class="line">종가 {order["close"]}가 200일 평균 {order["ma"]} 아래라서 쉬는 날입니다.</div>')
+        body = (f'<div class="line"><b>오늘 체결되었을 것으로 보임</b> · {how}</div>'
+                f'<div class="nums">{num("체결가", fill["fill"], blue)}'
+                f'{num("익절가", fill["target"], green)}{num("손절가", fill["stop"], red)}</div>')
     else:
-        color = blue
-        qty = ""
-        if fx:
-            shares = paper.BUDGET_KRW / fx / order["limit"]
-            qty = (f'<div class="line">{paper.BUDGET_KRW // 10000}만원이면 약 {shares:.2f}주 '
-                   f'(1주 단위면 {int(shares)}주)</div>')
-        inner = (f'<div class="nums">{num("매수 상한가", order["limit"], blue)}'
-                 f'{num("보통 체결되는 범위", str(order["limit"]) + " ~ " + str(order["range_low"]), blue)}'
-                 f'{num("매수 하한가 (참고)", order["floor"], grey)}'
-                 f'{num("익절가", order["target"], green)}{num("손절가", order["stop"], red)}</div>'
-                 f'{qty}'
-                 f'<div class="line small">매수 상한가에 지정가로 걸어 둡니다. 그보다 싸게 시작하면 더 싼 시가에 체결됩니다. '
-                 f'익절가와 손절가는 상한가에 체결됐을 때 기준이고, 더 싸게 체결되면 그만큼 함께 내려갑니다.</div>'
-                 f'<div class="line small">보통 체결되는 범위: 과거에 시가가 상한가보다 낮게 열린 날의 90%가 이 범위 안이었어요.</div>'
-                 f'<div class="line small">매수 하한가는 참고선입니다. 16년 동안 시가가 이보다 낮게 시작해 체결된 날은 7번뿐이었고, '
-                 f'그 7번의 평균 결과는 -4.7%였습니다. 규칙은 그런 날에도 사는 것으로 계산합니다.</div>'
-                 f'<div class="line small">체결된 뒤에는 익절가나 손절가에 닿을 때 팔고, '
-                 f'{paper.H}거래일 안에 둘 다 안 닿으면 {paper.H}일째 종가에 팝니다.</div>')
-    card = (f'<div class="card order" style="--c:{color}">'
-            f'<h1>{"보유 중인 연습 매매" if pos else "오늘 체결 후 가격" if fill else "오늘 밤 주문"} '
-            f'({nxt.month}/{nxt.day:02d} 장)</h1>'
-            f'<div class="small">{e(str(last_date))} 종가로 계산한 달러 가격 · 규칙이 계산한 값이며 추천이 아닙니다</div>'
-            + ("" if pos else
-               '<div class="small">장 시작 전(한국 시간 밤 10시 30분, 겨울에는 11시 30분 전)에 미리 걸어 두는 가격입니다. '
-               '하루 동안 바뀌지 않으며, 장이 열린 뒤에 주문하면 연습 기록과 결과가 달라집니다.</div>') +
-            f'{inner}'
-            + (f'<div class="line">장 전 가격 <b>{pre["price"]}</b> (전일 종가 대비 {pre["change"]:+.1%}) · '
-               f'<span class="small">가져온 시각 {e(pre["fetched"])} (한국 시간)</span>'
-               f'{"<br>" + e(pre["note"]) if pre["note"] else ""}</div>' if pre else "") +
-            f'<div class="line small">이 규칙의 과거 성적(2020년 이후): 승률 58%, 평균 +1.9%/회, 최대낙폭 -59%</div></div>')
-    s = paper.stats(trades)
-    start = datetime.date.fromisoformat(paper.START)
-    record = (f'<div class="record">연습 기록 ({start.month}/{start.day}부터, 실제 돈 없이 이 가격대로 했다면): '
-              f'완료 {s["count"]}건 · 승률 {s["win_rate"]:.0%} · 누적 {s["total"]:+.1%}</div>')
+        body = '<div class="line small">지금은 보유 중인 것이 없습니다.'
+        body += (f' 장 전 가격 기준: {e(pre["note"])}</div>' if pre and pre["note"] else '</div>')
+    record = (f'<div class="card order practice" style="--c:{grey}"><h2>연습 기록</h2>'
+              f'<div class="small">{summary}</div>{body}</div>')
     return card + record
 
 

@@ -34,9 +34,10 @@ def update(path, rows, trades, open_pos):
         if key in old:
             line.update({k: old[key].get(k) or "" for k in MINE})
         line[COLS[0]], line["상태"] = key, r["status"]
-        if r["status"] == "주문":
+        if "limit" in r:   # 보유 중인 날도 그날 가격은 참고용으로 적어 둔다
             line.update({"매수 상한가": r["limit"], "보통 체결 범위 아래쪽": r["range_low"],
                          "매수 하한가(참고)": r["floor"], "익절가": r["target"], "손절가": r["stop"]})
+        if r["status"] == "주문":
             t = done.get(r["date"])
             p = open_pos if open_pos and open_pos["entry_date"] == r["date"] else None
             if t or p:   # 그날 체결된 것으로 기록된 경우: 실제 체결가 기준 익절·손절가
