@@ -136,6 +136,39 @@ def _minutes():
     return m, m[(m.index.date == now_ny.date()) & (hhmm >= "09:30") & (hhmm < "16:00")]
 
 
+def premarket(df, open_pos, order):
+    """정규장 시작 전이면 장 전 가격을 받아, 정해 둔 가격과 비교한 한 줄을 돌려준다. 장 전이 아니거나 못 받으면 None."""
+    now_ny = pd.Timestamp.now(tz="America/New_York")
+    if now_ny.weekday() >= 5 or now_ny.strftime("%H:%M") >= "09:30":
+        return None
+    m, _ = _minutes()
+    if m is None:
+        return None
+    pre = m[m.index.date == now_ny.date()]
+    if pre.empty:
+        return None
+    price, prev = float(pre["Close"].iloc[-1]), float(df["Close"].iloc[-1])
+    if open_pos:
+        p = open_pos
+        if price <= p["stop"]:
+            note = f"손절가 {p['stop']} 아래예요. 이대로 열리면 규칙상 시가에 손절로 정리됩니다."
+        elif price >= p["target"]:
+            note = f"익절가 {p['target']} 위예요. 이대로 열리면 규칙상 시가에 익절로 정리됩니다."
+        else:
+            note = f"익절가 {p['target']}까지 {p['target'] / price - 1:+.1%} · 손절가 {p['stop']}까지 {p['stop'] / price - 1:+.1%}"
+    elif not order or order["skip"]:
+        note = ""
+    elif price > order["limit"]:
+        note = f"매수 상한가 {order['limit']}보다 {price / order['limit'] - 1:.1%} 위예요. 이대로 열리면 장중에 내려와야 체결됩니다."
+    elif price >= order["range_low"]:
+        note = f"매수 상한가 {order['limit']} 아래, 보통 체결되는 범위 안이에요. 이대로 열리면 시가에 체결됩니다."
+    else:
+        note = (f"보통 체결되는 범위({order['limit']} ~ {order['range_low']})보다 낮아요. "
+                "이대로 열리면 평소보다 크게 낮은 시가에 체결됩니다.")
+    return dict(price=round(price, 2), change=price / prev - 1, note=note,
+                fetched=pd.Timestamp.now(tz="Asia/Seoul").strftime("%m/%d %H:%M"))
+
+
 def today_fill(order, reg=None):
     """오늘 장에서 매수 지정가가 이미 체결된 것으로 보이면 실제 체결가 기준 가격을 돌려준다.
 

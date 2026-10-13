@@ -286,7 +286,7 @@ def main():
             return report.build(Path(__file__).with_name("soxl_report.html"), last, prices,
                                 signals, rows, curves, period, note, plan,
                                 paper_data=(ptr, ppos, pord, plast, fx), live=live, refresh=refresh, fill=fill,
-                                log=log)
+                                log=log, pre=paper.premarket(pdf, ppos, pord))
 
         live = paper.live_status(ppos, pord) if a.live else None
         if a.live and live is None:

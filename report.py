@@ -144,7 +144,7 @@ def _next_session(day):
     return day
 
 
-def _order_card(paper_data, fill=None):
+def _order_card(paper_data, fill=None, pre=None):
     """맨 위 카드: 단기 규칙이 계산한 다음 장의 매수·익절·손절 가격과 연습 기록 한 줄.
 
     fill: 오늘 장에서 이미 체결된 것으로 보일 때 paper.today_fill() 결과 (실제 체결가 기준 가격)
@@ -160,11 +160,16 @@ def _order_card(paper_data, fill=None):
 
     if pos:
         color = blue
-        inner = (f'<div class="big">연습 보유 중</div>'
+        back = last_date            # 보유가 끝난 다음 날(매수 가격이 다시 나오는 날)
+        for _ in range(pos["days_left"] + 1):
+            back = _next_session(back)
+        inner = (f'<div class="big">연습 보유 중 · {pos["days_held"] + 1}거래일째 / 최대 {paper.H}일</div>'
                  f'<div class="line">{e(str(pos["entry_date"]))}에 {pos["entry"]}에 산 것으로 기록 · '
-                 f'현재 {pos["last"]} ({pos["pnl"]:+.1%})</div>'
+                 f'{e(str(last_date))} 종가 {pos["last"]} ({pos["pnl"]:+.1%})</div>'
                  f'<div class="nums">{num("익절가", pos["target"], green)}{num("손절가", pos["stop"], red)}</div>'
-                 f'<div class="small">남은 기한 {pos["days_left"]}거래일. 그때까지 둘 다 안 닿으면 종가에 팝니다.</div>')
+                 f'<div class="line small">남은 기한 {pos["days_left"]}거래일. 그때까지 둘 다 안 닿으면 마지막 날 종가에 팝니다.</div>'
+                 f'<div class="line small">보유가 끝나면 다음 날부터 매수 상한가와 보통 체결 범위가 다시 나와요 '
+                 f'(늦어도 {back.month}/{back.day}).</div>')
     elif fill:
         color = blue
         how = (f'시가 {fill["open"]}가 매수 상한가 {fill["limit"]}보다 낮게 시작해, 시가에 체결' if fill["gapped"]
@@ -198,11 +203,16 @@ def _order_card(paper_data, fill=None):
                  f'<div class="line small">체결된 뒤에는 익절가나 손절가에 닿을 때 팔고, '
                  f'{paper.H}거래일 안에 둘 다 안 닿으면 {paper.H}일째 종가에 팝니다.</div>')
     card = (f'<div class="card order" style="--c:{color}">'
-            f'<h1>{"오늘 체결 후 가격" if (fill and not pos) else "오늘 밤 주문"} ({nxt.month}/{nxt.day:02d} 장)</h1>'
+            f'<h1>{"보유 중인 연습 매매" if pos else "오늘 체결 후 가격" if fill else "오늘 밤 주문"} '
+            f'({nxt.month}/{nxt.day:02d} 장)</h1>'
             f'<div class="small">{e(str(last_date))} 종가로 계산한 달러 가격 · 규칙이 계산한 값이며 추천이 아닙니다</div>'
-            f'<div class="small">장 시작 전(한국 시간 밤 10시 30분, 겨울에는 11시 30분 전)에 미리 걸어 두는 가격입니다. '
-            f'하루 동안 바뀌지 않으며, 장이 열린 뒤에 주문하면 연습 기록과 결과가 달라집니다.</div>'
+            + ("" if pos else
+               '<div class="small">장 시작 전(한국 시간 밤 10시 30분, 겨울에는 11시 30분 전)에 미리 걸어 두는 가격입니다. '
+               '하루 동안 바뀌지 않으며, 장이 열린 뒤에 주문하면 연습 기록과 결과가 달라집니다.</div>') +
             f'{inner}'
+            + (f'<div class="line">장 전 가격 <b>{pre["price"]}</b> (전일 종가 대비 {pre["change"]:+.1%}) · '
+               f'<span class="small">가져온 시각 {e(pre["fetched"])} (한국 시간)</span>'
+               f'{"<br>" + e(pre["note"]) if pre["note"] else ""}</div>' if pre else "") +
             f'<div class="line small">이 규칙의 과거 성적(2020년 이후): 승률 58%, 평균 +1.9%/회, 최대낙폭 -59%</div></div>')
     s = paper.stats(trades)
     start = datetime.date.fromisoformat(paper.START)
@@ -308,7 +318,7 @@ def _paper_details(paper_data):
 
 
 def build(path, last_date, prices, signals, rows, curves, period, note="", plan=None, paper_data=None,
-          live=None, refresh=None, fill=None, log=False):
+          live=None, refresh=None, fill=None, log=False, pre=None):
     """결과 페이지를 path에 쓰고, 그 경로(절대경로)를 돌려준다.
 
     prices: {이름: 값}, signals: [(전략 이름, buy/sell/hold/cash)],
@@ -370,7 +380,7 @@ def build(path, last_date, prices, signals, rows, curves, period, note="", plan=
 <body>
 <div class="wrap">
 {_live_card(live)}
-{_order_card(paper_data, fill) if paper_data else hero}
+{_order_card(paper_data, fill, pre) if paper_data else hero}
 {"" if paper_data else plan_html}
 {trend_html if paper_data else ""}
 {_howto_cards() if paper_data else ""}
